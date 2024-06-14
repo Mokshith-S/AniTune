@@ -7,7 +7,7 @@ import aiohttp
 from typing import Union, Optional
 
 app = FastAPI()
-API_KEY = "e5f2c3bc5c08d853346a559303fb3127"
+API_KEY = ""
 header = {
     "Accept" : "application/json, text/javascript, */*; q=0.01",
     "Accept-Encoding" : "gzip, deflate, br, zstd",
