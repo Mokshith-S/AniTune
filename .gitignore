@@ -1,4 +1,4 @@
-imp_url.txt
+.idea
+__pycache__
 test.html
-*.xml
-*iml
+imp_url.txt
