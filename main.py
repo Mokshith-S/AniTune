@@ -5,9 +5,13 @@ from pydantic import BaseModel, Field
 import asyncio
 import aiohttp
 from typing import Union, Optional
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 app = FastAPI()
-API_KEY = ""
+API_KEY = os.getenv("API_KEY")
 header = {
     "Accept" : "application/json, text/javascript, */*; q=0.01",
     "Accept-Encoding" : "gzip, deflate, br, zstd",
@@ -42,12 +46,14 @@ async def fetch_anime_details(sem, url, session):
     async with sem:
         return await fetch(url, session)
 async def get_songs(anime_ids: list):
-    urls = [f'https://api.myanimelist.net/v2/anime/{ani_id}?fields=title,opening_themes,ending_themes' for ani_id in anime_ids]
     sem = asyncio.Semaphore(3)
-
+    concrt_prc_rng = 0
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_anime_details(sem, url, session) for url in urls]
-        result = await asyncio.gather(*tasks)
+        while concrt_prc_rng <= len(anime_ids):
+            urls = list(map(lambda ani_id: f'https://api.myanimelist.net/v2/anime/{ani_id}?fields=title,opening_themes,ending_themes',anime_ids[concrt_prc_rng: concrt_prc_rng + 3]))
+            tasks = [fetch_anime_details(sem, url, session) for url in urls]
+            result = await asyncio.gather(*tasks)
+            concrt_prc_rng += 3
 
 @app.get("/")
 def get_anime_list(ani_input: InputModel):
