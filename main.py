@@ -1,6 +1,6 @@
 import requests
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 import asyncio
 import aiohttp
@@ -8,7 +8,7 @@ from typing import Union, Optional
 from dotenv import load_dotenv
 import os
 
-load_dotenv("./ani_key.env")
+load_dotenv("./access_key.env")
 
 app = FastAPI()
 
@@ -42,64 +42,70 @@ mal_api_header = {
 class InputModel(BaseModel):
     mal_user_name: str = Field(default=None)
     song_limit: int = Field(default=100)
+    category_type: int = Field(default=1)
 
 
 async def fetch_anime_details(url, session):
-    async with session.get(url, header=mal_api_header) as response:
-        return response.json()
+    async with session.get(url, headers=mal_api_header) as response:
+        return await response.json()
 
 
-async def get_songs(anime_ids: list):
-    concrt_prc_rng = 0
+async def get_songs(anime_ids: list, limit):
+    urls_to_process = 0
+    global aniTuneLibrary
     async with aiohttp.ClientSession() as session:
-        while concrt_prc_rng <= len(anime_ids):
+        while urls_to_process <= len(anime_ids):
             urls = list(map(lambda
                                 ani_id: f'https://api.myanimelist.net/v2/anime/{ani_id}?fields=title,opening_themes,ending_themes',
-                            anime_ids[concrt_prc_rng: concrt_prc_rng + 3]))
-
+                            anime_ids[urls_to_process: urls_to_process + 3]))
+            urls_to_process += 3
             tasks = [fetch_anime_details(url, session) for url in urls]
             result = await asyncio.gather(*tasks)
             for res in result:
-                aniTuneLibrary[res.get("id")] = {
-                    "title": res.get("title"),
-                    "opening": [{"op_sng": song.get("text").split("\\")[1]} for song in res.get("opening_themes")],
-                    "ending": [{"en_sng": song.get("text").split("\\")[1]} for song in res.get("ending_themes")]
-                }
-                concrt_prc_rng += len(res.get("opening_themes")) + len(res.get("ending_themes"))
+                for song_detail in res.get("opening_themes", []):
+                    aniTuneLibrary[song_detail.get("id")] = song_detail.get("text").split("\"")[1]
+
+                for song_detail in res.get("ending_themes", []):
+                    aniTuneLibrary[song_detail.get("id")] = song_detail.get("text").split("\"")[1]
+
+                aniTuneExtracted = len(aniTuneLibrary)
+
+                if aniTuneExtracted > limit:
+                    tmp = {k: aniTuneLibrary[k] for k in list(aniTuneLibrary.keys())[:100]}
+                    aniTuneLibrary = tmp
+                    break
+                elif aniTuneExtracted == limit:
+                    break
+    if len(aniTuneLibrary) < limit:
+        return 1
+    return 0
+
+
+def generate_url(mal_user, offset, category_type):
+    return fr"https://myanimelist.net/animelist/{mal_user}/load.json?offset={offset}&status={category_type}"
 
 
 @app.get("/")
 def get_anime_list(ani_input: InputModel):
     if ani_input.mal_user_name is None:
-        raise HTTPException(status_code=404, detail=f"User {ani_input.mal_user_name} not found")
-    url = fr"https://myanimelist.net/animelist/{ani_input.mal_user_name}/load.json?offset=0&status=1"
-    response = requests.get(url, headers=header)
-    if response.status_code == 200:
-        anime_list = list(map(lambda anime: anime.get("anime_id"), response.json()))
-        asyncio.run(get_songs(anime_list))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {ani_input.mal_user_name} not found")
+    if 0 > ani_input.category_type or ani_input.category_type > 6:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid category")
+    controller = 1
+    offset = 0
 
-
-def exec():
-    data = {}
-    mal_api_header = {
-        'X-MAL-CLIENT-ID': API_KEY,
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Accept-Encoding": "gzip, deflate, br, zstd",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Connection": "keep-alive",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
-    }
-    ani_id = 1
-    url = f'https://api.myanimelist.net/v2/anime/{ani_id}?fields=title,opening_themes,ending_themes'
-
-    response = requests.get(url, headers=mal_api_header)
-    if response.status_code == 200:
-        data = response.json()
-    data
+    while controller == 1:
+        url = generate_url(ani_input.mal_user_name, offset, ani_input.category_type)
+        response = requests.get(url, headers=header)
+        if response.status_code == 200:
+            ani_data = response.json()
+            if len(ani_data) == 0:
+                break
+            anime_list = list(map(lambda anime: anime.get("anime_id"), ani_data))
+            controller = asyncio.run(get_songs(anime_list, ani_input.song_limit))
+        offset += 200
+    return aniTuneLibrary
 
 
 if __name__ == "__main__":
     uvicorn.run("main:app", reload=True, port=80, host="127.0.0.1")
-
-# if __name__ == '__main__':
-#     exec()
