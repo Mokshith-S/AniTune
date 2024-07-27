@@ -7,6 +7,8 @@ import aiohttp
 from typing import Union, Optional
 from dotenv import load_dotenv
 import os
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
 
 load_dotenv("./access_key.env")
 
@@ -15,6 +17,11 @@ app = FastAPI()
 aniTuneLibrary = set()
 
 API_KEY = os.getenv("API_KEY")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_KEY = os.getenv("CLIENT_KEY")
+scope = "playlist-modify-public"
+redirect_url = "http://127.0.0.1:80/callback"
+
 header = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -88,6 +95,31 @@ def generate_url(mal_user, offset, category_type):
     return fr"https://myanimelist.net/animelist/{mal_user}/load.json?offset={offset}&status={category_type}"
 
 
+def authenticate():
+    sp = spotipy.Spotify(
+        auth_manager=SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_KEY, scope=scope,
+                                  redirect_uri=redirect_url))
+    return sp
+
+
+def get_track_ids(sp, s_names: set):
+    # while len(s_names) != 0:
+    song = s_names.pop()
+    result = sp.search(q=song, limit=1, type="track")
+    print(result)
+    tracks = result['tracks']['items']
+    if tracks:
+        print(tracks[0]["id"])
+        return tracks[0]['id']
+    else:
+        return None
+
+
+@app.get("/callback")
+def auth_callback():
+    print("Entered")
+
+
 @app.get("/")
 def get_anime_list(ani_input: InputModel):
     if ani_input.mal_user_name is None:
@@ -107,7 +139,9 @@ def get_anime_list(ani_input: InputModel):
             anime_list = list(map(lambda anime: anime.get("anime_id"), ani_data))
             controller = asyncio.run(get_songs(anime_list, ani_input.song_limit))
         offset += 200
-    return aniTuneLibrary
+
+    spotify_access = authenticate()
+    get_track_ids(spotify_access, aniTuneLibrary)
 
 
 if __name__ == "__main__":
