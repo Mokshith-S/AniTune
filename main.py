@@ -12,7 +12,7 @@ load_dotenv("./access_key.env")
 
 app = FastAPI()
 
-aniTuneLibrary = dict()
+aniTuneLibrary = set()
 
 API_KEY = os.getenv("API_KEY")
 header = {
@@ -47,7 +47,10 @@ class InputModel(BaseModel):
 
 async def fetch_anime_details(url, session):
     async with session.get(url, headers=mal_api_header) as response:
-        return await response.json()
+        if response.status == 200:
+            return await response.json()
+        elif response.status == 500:
+            return None
 
 
 async def get_songs(anime_ids: list, limit):
@@ -63,19 +66,19 @@ async def get_songs(anime_ids: list, limit):
             result = await asyncio.gather(*tasks)
             for res in result:
                 for song_detail in res.get("opening_themes", []):
-                    aniTuneLibrary[song_detail.get("id")] = song_detail.get("text").split("\"")[1]
+                    if len(aniTuneLibrary) != limit:
+                        song_name = song_detail.get("text").split("\"")[1]
+                        song_name += song_detail.get("text").split("\"")[2].split("(")[0]
+                        aniTuneLibrary.add(song_name.strip())
+                    else:
+                        return 0
 
                 for song_detail in res.get("ending_themes", []):
-                    aniTuneLibrary[song_detail.get("id")] = song_detail.get("text").split("\"")[1]
+                    if len(aniTuneLibrary) != limit:
+                        aniTuneLibrary.add(song_detail.get("text").split("\"")[1])
+                    else:
+                        return 0
 
-                aniTuneExtracted = len(aniTuneLibrary)
-
-                if aniTuneExtracted > limit:
-                    tmp = {k: aniTuneLibrary[k] for k in list(aniTuneLibrary.keys())[:100]}
-                    aniTuneLibrary = tmp
-                    break
-                elif aniTuneExtracted == limit:
-                    break
     if len(aniTuneLibrary) < limit:
         return 1
     return 0
