@@ -122,12 +122,21 @@ def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
                                        collaborative=False)
     playlist_id = playlist['id']
     sp.playlist_add_items(playlist_id=playlist_id, items=track_ids)
-    print(f"Playlist created {playlist_id}")
-    return playlist["external_urls"]
+    print(playlist["external_urls"])
+    return playlist_id
+
+
+async def delete_playlist(sp, time, playlist_id, uid):
+    await asyncio.sleep(time)
+    await sp.user_playlist_unfollow(user=uid, playlist_id=playlist_id)
+
+
+def perform_delayed_tasks(sp, time, play_id, userid):
+    asyncio.create_task(delete_playlist(sp, time, play_id, userid))
 
 
 @app.get("/")
-def get_anime_list(ani_input: InputModel):
+async def get_anime_list(ani_input: InputModel):
     if ani_input.mal_user_name is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {ani_input.mal_user_name} not found")
     if 0 > ani_input.category_type or ani_input.category_type > 6:
@@ -151,7 +160,8 @@ def get_anime_list(ani_input: InputModel):
     userid = spotify_access.current_user()["id"]
     playlist_name = str(uuid4())
     playlist_desc = "Message"
-    create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
+    play_id = create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
+    asyncio.run(perform_delayed_tasks(spotify_access, 300, play_id, userid))
 
 
 if __name__ == "__main__":
