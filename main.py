@@ -6,6 +6,7 @@ import asyncio
 import aiohttp
 from typing import Union, Optional
 from dotenv import load_dotenv
+from uuid import uuid4
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -19,7 +20,8 @@ aniTuneLibrary = set()
 API_KEY = os.getenv("API_KEY")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_KEY = os.getenv("CLIENT_KEY")
-scope = "playlist-modify-public"
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+scope = "playlist-modify-public user-library-read"
 redirect_url = "http://127.0.0.1:80/callback"
 
 header = {
@@ -96,23 +98,32 @@ def generate_url(mal_user, offset, category_type):
 
 
 def authenticate():
-    sp = spotipy.Spotify(
-        auth_manager=SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_KEY, scope=scope,
-                                  redirect_uri=redirect_url))
-    return sp
+    sp = SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_KEY, scope=scope,
+                      redirect_uri=redirect_url)
+    refresh_sp_frm_token = sp.refresh_access_token(REFRESH_TOKEN)
+    access_point = spotipy.Spotify(auth=refresh_sp_frm_token["access_token"])
+    return access_point
 
 
 def get_track_ids(sp, s_names: set):
-    # while len(s_names) != 0:
-    song = s_names.pop()
-    result = sp.search(q=song, limit=1, type="track")
-    print(result)
-    tracks = result['tracks']['items']
-    if tracks:
-        print(tracks[0]["id"])
-        return tracks[0]['id']
-    else:
-        return None
+    track_ids = []
+    while len(s_names) != 0:
+        song = s_names.pop()
+        result = sp.search(q=song, limit=1, type="track")
+        tracks = result['tracks']['items']
+        if tracks:
+            # print(tracks[0]["id"])
+            track_ids.append(tracks[0]['id'])
+    return track_ids
+
+
+def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
+    playlist = sp.user_playlist_create(user=userid, name=playlist_name, description=playlist_desc, public=True,
+                                       collaborative=False)
+    playlist_id = playlist['id']
+    sp.playlist_add_items(playlist_id=playlist_id, items=track_ids)
+    print(f"Playlist created {playlist_id}")
+    return playlist["external_urls"]
 
 
 @app.get("/callback")
@@ -141,7 +152,11 @@ def get_anime_list(ani_input: InputModel):
         offset += 200
 
     spotify_access = authenticate()
-    get_track_ids(spotify_access, aniTuneLibrary)
+    track_ids = get_track_ids(spotify_access, aniTuneLibrary)
+    userid = spotify_access.current_user()["id"]
+    playlist_name = str(uuid4())
+    playlist_desc = "Message"
+    create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
 
 
 if __name__ == "__main__":
