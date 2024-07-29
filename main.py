@@ -126,11 +126,6 @@ def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
     return playlist["external_urls"]
 
 
-@app.get("/callback")
-def auth_callback():
-    print("Entered")
-
-
 @app.get("/")
 def get_anime_list(ani_input: InputModel):
     if ani_input.mal_user_name is None:
