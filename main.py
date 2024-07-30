@@ -133,7 +133,9 @@ def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
     playlist = sp.user_playlist_create(user=userid, name=playlist_name, description=playlist_desc, public=True,
                                        collaborative=False)
     playlist_id = playlist['id']
-    sp.playlist_add_items(playlist_id=playlist_id, items=track_ids)
+    for idx in range(0, len(track_ids), 100):
+        track_grp = track_ids[idx:idx + 100]
+        sp.playlist_add_items(playlist_id=playlist_id, items=track_grp)
     link = playlist["external_urls"]
     return playlist_id, link
 
