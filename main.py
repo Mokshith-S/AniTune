@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import asyncio
 import aiohttp
-from typing import Union, Optional
 from dotenv import load_dotenv
 from uuid import uuid4
 import os
@@ -111,6 +110,7 @@ def authenticate():
     try:
         refresh_sp_frm_token = sp.refresh_access_token(REFRESH_TOKEN)
         access_point = spotipy.Spotify(auth=refresh_sp_frm_token["access_token"])
+        print("Authenticated")
         return access_point
     except requests.exceptions.RequestException as e:
         print(f"Failed Authentication -- {e}")
@@ -139,7 +139,6 @@ def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
 
 
 async def delete_playlist(sp, time, playlist_id, uid):
-    print(f"{playlist_id} {uid}")
     await asyncio.sleep(time)
     sp.user_playlist_unfollow(user=uid, playlist_id=playlist_id)
     print(f"Playlist {playlist_id} Deleted")
@@ -176,7 +175,7 @@ async def get_anime_list(ani_input: InputModel):
     playlist_desc = ("Listen to your favourite anime songs")
     play_id, link = create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
     print(f"Created Playlist {playlist_name}")
-    asyncio.create_task(delete_playlist(spotify_access, 30, play_id, userid))
+    asyncio.create_task(delete_playlist(spotify_access, 300, play_id, userid))
     print("Initiated Playlist Deletion")
     response_body = {"Playlist_link": link}
     return JSONResponse(content=response_body, status_code=status.HTTP_200_OK)
