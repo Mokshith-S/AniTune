@@ -1,6 +1,9 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import asyncio
 import aiohttp
@@ -63,6 +66,7 @@ async def fetch_anime_details(url, session):
 
 
 async def get_songs(anime_ids: list, limit):
+    print("Extracting song id")
     urls_to_process = 0
     global aniTuneLibrary
     async with aiohttp.ClientSession() as session:
@@ -98,11 +102,19 @@ def generate_url(mal_user, offset, category_type):
 
 
 def authenticate():
+    session = requests.Session()
+    retry = Retry(connect=5, backoff_factor=0.5)
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
     sp = SpotifyOAuth(client_id=CLIENT_ID, client_secret=CLIENT_KEY, scope=scope,
-                      redirect_uri=redirect_url)
-    refresh_sp_frm_token = sp.refresh_access_token(REFRESH_TOKEN)
-    access_point = spotipy.Spotify(auth=refresh_sp_frm_token["access_token"])
-    return access_point
+                      redirect_uri=redirect_url, requests_session=session)
+    try:
+        refresh_sp_frm_token = sp.refresh_access_token(REFRESH_TOKEN)
+        access_point = spotipy.Spotify(auth=refresh_sp_frm_token["access_token"])
+        return access_point
+    except requests.exceptions.RequestException as e:
+        print(f"Failed Authentication -- {e}")
+        return None
 
 
 def get_track_ids(sp, s_names: set):
@@ -122,17 +134,15 @@ def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
                                        collaborative=False)
     playlist_id = playlist['id']
     sp.playlist_add_items(playlist_id=playlist_id, items=track_ids)
-    print(playlist["external_urls"])
-    return playlist_id
+    link = playlist["external_urls"]
+    return playlist_id, link
 
 
 async def delete_playlist(sp, time, playlist_id, uid):
+    print(f"{playlist_id} {uid}")
     await asyncio.sleep(time)
-    await sp.user_playlist_unfollow(user=uid, playlist_id=playlist_id)
-
-
-def perform_delayed_tasks(sp, time, play_id, userid):
-    asyncio.create_task(delete_playlist(sp, time, play_id, userid))
+    sp.user_playlist_unfollow(user=uid, playlist_id=playlist_id)
+    print(f"Playlist {playlist_id} Deleted")
 
 
 @app.get("/")
@@ -147,21 +157,29 @@ async def get_anime_list(ani_input: InputModel):
     while controller == 1:
         url = generate_url(ani_input.mal_user_name, offset, ani_input.category_type)
         response = requests.get(url, headers=header)
+        print("Fetching User Anime Collections")
         if response.status_code == 200:
             ani_data = response.json()
             if len(ani_data) == 0:
                 break
             anime_list = list(map(lambda anime: anime.get("anime_id"), ani_data))
-            controller = asyncio.run(get_songs(anime_list, ani_input.song_limit))
+            controller = await get_songs(anime_list, ani_input.song_limit)
         offset += 200
-
+    print("Extracted All Required Songs")
     spotify_access = authenticate()
+    if spotify_access is None:
+        return JSONResponse(content={"body": "Spotify Auth Error"})
     track_ids = get_track_ids(spotify_access, aniTuneLibrary)
+    print("Extract Song Track Id")
     userid = spotify_access.current_user()["id"]
     playlist_name = str(uuid4())
-    playlist_desc = "Message"
-    play_id = create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
-    asyncio.run(perform_delayed_tasks(spotify_access, 300, play_id, userid))
+    playlist_desc = ("Listen to your favourite anime songs")
+    play_id, link = create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_ids)
+    print(f"Created Playlist {playlist_name}")
+    asyncio.create_task(delete_playlist(spotify_access, 30, play_id, userid))
+    print("Initiated Playlist Deletion")
+    response_body = {"Playlist_link": link}
+    return JSONResponse(content=response_body, status_code=status.HTTP_200_OK)
 
 
 if __name__ == "__main__":
