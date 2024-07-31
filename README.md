@@ -55,7 +55,7 @@ Install dependencies required for AniTune API.
 pip install -r requirement.txt
 ```
 
-## API
+## API Used
 
 1. **MyAnimeList API**:
     - Register an application on [MyAnimeList Developer Portal](https://myanimelist.net/apiconfig).
