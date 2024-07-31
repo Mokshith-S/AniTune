@@ -146,11 +146,11 @@ async def delete_playlist(sp, time, playlist_id, uid):
     print(f"Playlist {playlist_id} Deleted")
 
 
-@app.get("/")
+@app.get("/home")
 async def get_anime_list(ani_input: InputModel):
     if ani_input.mal_user_name is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {ani_input.mal_user_name} not found")
-    if 0 > ani_input.category_type or ani_input.category_type > 6:
+    if 0 < ani_input.category_type or ani_input.category_type > 6:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid category")
     controller = 1
     offset = 0
