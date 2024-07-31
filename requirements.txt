@@ -1,0 +1,8 @@
+aiohttp==3.8.5
+fastapi==0.111.1
+pydantic==1.10.8
+python-dotenv==1.0.1
+Requests==2.32.3
+spotipy==2.24.0
+urllib3==1.26.16
+uvicorn==0.30.3
