@@ -1,3 +1,5 @@
+import json
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -12,10 +14,17 @@ from uuid import uuid4
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+from jikanpy.exceptions import JikanException
+
+from exception_handler import AniException
+from ani_getter import AniGetter
+from model import InputModel, RangeModel
 
 load_dotenv("./access_key.env")
 
 app = FastAPI()
+
+exception = AniException()
 
 aniTuneLibrary = set()
 
@@ -50,12 +59,6 @@ mal_api_header = {
 }
 
 
-class InputModel(BaseModel):
-    mal_user_name: str = Field(default=None)
-    song_limit: int = Field(default=100)
-    category_type: int = Field(default=1)
-
-
 async def fetch_anime_details(url, session):
     async with session.get(url, headers=mal_api_header) as response:
         if response.status == 200:
@@ -68,6 +71,7 @@ async def get_songs(anime_ids: list, limit):
     print("Extracting song id")
     urls_to_process = 0
     global aniTuneLibrary
+
     async with aiohttp.ClientSession() as session:
         while urls_to_process <= len(anime_ids):
             urls = list(map(lambda
@@ -147,11 +151,31 @@ async def delete_playlist(sp, time, playlist_id, uid):
 
 
 @app.get("/home")
-async def get_anime_list(ani_input: InputModel):
-    if ani_input.mal_user_name is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {ani_input.mal_user_name} not found")
+async def get_anime_list(user_input: InputModel):
+    if user_input.mal_user_name is None:
+        exception.user_field_empty_exception()
+
+    try:
+        aniHunter = AniGetter(user_input.mal_user_name)
+        user_stats = aniHunter.user_statistics()
+        mapped_stats = json.dumps({
+            "All Animes": user_stats[0],
+            "Watching": user_stats[1],
+            "Completed": user_stats[2],
+            "On Hold": user_stats[3],
+            "Dropped": user_stats[4],
+            "Plan to Watch": user_stats[5]
+        })
+        return JSONResponse(content=mapped_stats)
+    except JikanException:
+        exception.user_exception(user_input.mal_user_name)
+
+
+@app.post("/fetch")
+async def spotPlaylist(ani_input: RangeModel):
     if 0 < ani_input.category_type and ani_input.category_type > 6:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid category")
+        exception.category_exception()
+
     controller = 1
     offset = 0
 
