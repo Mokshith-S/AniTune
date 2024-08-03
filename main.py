@@ -1,12 +1,12 @@
 import json
-
+from starlette.middleware.sessions import SessionMiddleware
 import requests
+from requests.sessions import Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 import asyncio
 import aiohttp
 from dotenv import load_dotenv
@@ -15,7 +15,6 @@ import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from jikanpy.exceptions import JikanException
-
 from exception_handler import AniException
 from ani_getter import AniGetter
 from model import InputModel, RangeModel
@@ -23,6 +22,7 @@ from model import InputModel, RangeModel
 load_dotenv("./access_key.env")
 
 app = FastAPI()
+# app.add_middleware(SessionMiddleware, secret_key="RawJ8JsesCLUDHloDu2vdWb2Y")
 
 exception = AniException()
 
@@ -176,17 +176,35 @@ async def spotPlaylist(ani_input: RangeModel):
     if 0 < ani_input.category_type and ani_input.category_type > 6:
         exception.category_exception()
 
+    aniHunter = AniGetter(ani_input.mal_user_name)
+    user_stats = aniHunter.user_statistics()
+
+    if ani_input.anime_start > user_stats[ani_input.category_type]:
+        exception.anime_range_exception()
+
     controller = 1
     offset = 0
+    start = ani_input.anime_start
+    target_amount = ani_input.anime_total
+    anime_id_list = []
 
     while controller == 1:
-        url = generate_url(ani_input.mal_user_name, offset, ani_input.category_type)
+        url = generate_url(ani_input.mal_user_name, start, ani_input.category_type)
         response = requests.get(url, headers=header)
         print("Fetching User Anime Collections")
         if response.status_code == 200:
             ani_data = response.json()
             if len(ani_data) == 0:
-                break
+                exception.empty_category_exception(
+                    ["All Anime", "Watching", "Completed", "On Hold", "Dropped", "Plan to Watch"][
+                        ani_input.category_type])
+
+            for anime_count, anime_entry in enumerate(ani_data, start=1):
+                anime_id_list.append(anime_entry.get("anime_id"))
+                if anime_count == target_amount:
+                    controller = 0
+                    break
+
             anime_list = list(map(lambda anime: anime.get("anime_id"), ani_data))
             controller = await get_songs(anime_list, ani_input.song_limit)
         offset += 200
