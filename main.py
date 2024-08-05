@@ -18,6 +18,7 @@ from jikanpy.exceptions import JikanException
 from exception_handler import AniException
 from ani_getter import AniGetter
 from model import InputModel, RangeModel
+import math as m
 
 load_dotenv("./access_key.env")
 
@@ -26,7 +27,7 @@ app = FastAPI()
 
 exception = AniException()
 
-aniTuneLibrary = set()
+
 
 API_KEY = os.getenv("API_KEY")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -67,37 +68,22 @@ async def fetch_anime_details(url, session):
             return None
 
 
-async def get_songs(anime_ids: list, limit):
+def get_songs(anime_ids: list, limit, hunter):
     print("Extracting song id")
-    urls_to_process = 0
-    global aniTuneLibrary
+    anime_lib = set()
 
-    async with aiohttp.ClientSession() as session:
-        while urls_to_process <= len(anime_ids):
-            urls = list(map(lambda
-                                ani_id: f'https://api.myanimelist.net/v2/anime/{ani_id}?fields=title,opening_themes,ending_themes',
-                            anime_ids[urls_to_process: urls_to_process + 3]))
-            urls_to_process += 3
-            tasks = [fetch_anime_details(url, session) for url in urls]
-            result = await asyncio.gather(*tasks)
-            for res in result:
-                for song_detail in res.get("opening_themes", []):
-                    if len(aniTuneLibrary) != limit:
-                        song_name = song_detail.get("text").split("\"")[1]
-                        song_name += song_detail.get("text").split("\"")[2].split("(")[0]
-                        aniTuneLibrary.add(song_name.strip())
-                    else:
-                        return 0
+    for aid in anime_ids:
+        ani_result = hunter.get_theme_songs(aid)
 
-                for song_detail in res.get("ending_themes", []):
-                    if len(aniTuneLibrary) != limit:
-                        aniTuneLibrary.add(song_detail.get("text").split("\"")[1])
-                    else:
-                        return 0
+        for song_detail in ani_result.get("opening_themes", []):
+            song_name = song_detail.get("text").split("\"")[1]
+            song_name += song_detail.get("text").split("\"")[2].split("(")[0]
+            anime_lib.add(song_name.strip())
 
-    if len(aniTuneLibrary) < limit:
-        return 1
-    return 0
+        for song_detail in ani_result.get("ending_themes", []):
+            anime_lib.add(song_detail.get("text").split("\"")[1])
+
+    return anime_lib
 
 
 def generate_url(mal_user, offset, category_type):
@@ -182,32 +168,35 @@ async def spotPlaylist(ani_input: RangeModel):
     if ani_input.anime_start > user_stats[ani_input.category_type]:
         exception.anime_range_exception()
 
-    controller = 1
-    offset = 0
     start = ani_input.anime_start
     target_amount = ani_input.anime_total
+    total_fetches = m.ceil(target_amount / 200)
+    anime_processed = 0
     anime_id_list = []
 
-    while controller == 1:
+    fetches = 0
+    while fetches <= total_fetches:
         url = generate_url(ani_input.mal_user_name, start, ani_input.category_type)
         response = requests.get(url, headers=header)
         print("Fetching User Anime Collections")
         if response.status_code == 200:
             ani_data = response.json()
-            if len(ani_data) == 0:
+            if fetches == 0 and len(ani_data) == 0:
                 exception.empty_category_exception(
                     ["All Anime", "Watching", "Completed", "On Hold", "Dropped", "Plan to Watch"][
                         ani_input.category_type])
 
-            for anime_count, anime_entry in enumerate(ani_data, start=1):
+            for anime_entry in ani_data:
                 anime_id_list.append(anime_entry.get("anime_id"))
-                if anime_count == target_amount:
-                    controller = 0
+                anime_processed += 1
+                if anime_processed == target_amount:
                     break
 
-            anime_list = list(map(lambda anime: anime.get("anime_id"), ani_data))
-            controller = await get_songs(anime_list, ani_input.song_limit)
-        offset += 200
+        fetches += 1
+        start += 200
+
+    anime_song_collection = get_songs(anime_id_list, target_amount, aniHunter)
+
     print("Extracted All Required Songs")
     spotify_access = authenticate()
     if spotify_access is None:
