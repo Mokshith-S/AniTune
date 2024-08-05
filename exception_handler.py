@@ -17,3 +17,9 @@ class AniException:
 
     def anime_range_exception(self):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Exceeded category anime range")
+
+    def theme_extraction_exception(self):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Failed to fetch theme songs")
+
+    def spotify_auth_exception(self, e):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Error: {e}")

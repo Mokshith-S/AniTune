@@ -13,10 +13,10 @@ class AniGetter():
         """
         aniPrey = self.aniHunter.users(username=self.user_name, extension="statistics")["data"]["anime"]
         scavenge = list(aniPrey.values())[2:-2]
-        fscavenge = [scavenge[-1], scavenge[:-1]]
+        fscavenge = [scavenge[-1], *scavenge[:-1]]
         return fscavenge
 
-    async def get_theme_songs(self, id):
+    def get_theme_songs(self, id):
         """
         Gets Opening and Ending themes songs of anime
         :param id: ID of the target anime

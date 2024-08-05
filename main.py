@@ -1,14 +1,14 @@
 import json
-from starlette.middleware.sessions import SessionMiddleware
+import time
+
 import requests
-from requests.sessions import Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import uvicorn
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 import asyncio
-import aiohttp
+from rate_limiter import RateLimiter
 from dotenv import load_dotenv
 from uuid import uuid4
 import os
@@ -23,11 +23,7 @@ import math as m
 load_dotenv("./access_key.env")
 
 app = FastAPI()
-# app.add_middleware(SessionMiddleware, secret_key="RawJ8JsesCLUDHloDu2vdWb2Y")
-
 exception = AniException()
-
-
 
 API_KEY = os.getenv("API_KEY")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -68,20 +64,37 @@ async def fetch_anime_details(url, session):
             return None
 
 
-def get_songs(anime_ids: list, limit, hunter):
+def get_songs(anime_ids: list, hunter):
     print("Extracting song id")
     anime_lib = set()
 
     for aid in anime_ids:
-        ani_result = hunter.get_theme_songs(aid)
 
-        for song_detail in ani_result.get("opening_themes", []):
-            song_name = song_detail.get("text").split("\"")[1]
-            song_name += song_detail.get("text").split("\"")[2].split("(")[0]
+        try:
+            ani_result = hunter.get_theme_songs(aid)
+        except JikanException as e:
+            time.sleep(1)
+            ani_result = hunter.get_theme_songs(aid)
+
+        for song_detail in ani_result.get("openings", []):
+            if "eps" in song_detail:
+                eps_start = song_detail.find("eps")
+                eps_end = song_detail[eps_start:].find(")") + eps_start
+                song_name = song_detail[:eps_start - 1] + song_detail[eps_end + 1:]
+            else:
+                song_name = song_detail
+
             anime_lib.add(song_name.strip())
 
-        for song_detail in ani_result.get("ending_themes", []):
-            anime_lib.add(song_detail.get("text").split("\"")[1])
+        for song_detail in ani_result.get("endings", []):
+            if "eps" in song_detail:
+                eps_start = song_detail.find("eps")
+                eps_end = song_detail[eps_start:].find(")") + eps_start
+                song_name = song_detail[:eps_start - 1] + song_detail[eps_end + 1:]
+            else:
+                song_name = song_detail
+
+            anime_lib.add(song_name.strip())
 
     return anime_lib
 
@@ -103,8 +116,7 @@ def authenticate():
         print("Authenticated")
         return access_point
     except requests.exceptions.RequestException as e:
-        print(f"Failed Authentication -- {e}")
-        return None
+        raise exception.spotify_auth_exception(e)
 
 
 def get_track_ids(sp, s_names: set):
@@ -114,7 +126,6 @@ def get_track_ids(sp, s_names: set):
         result = sp.search(q=song, limit=1, type="track")
         tracks = result['tracks']['items']
         if tracks:
-            # print(tracks[0]["id"])
             track_ids.append(tracks[0]['id'])
     return track_ids
 
@@ -144,14 +155,14 @@ async def get_anime_list(user_input: InputModel):
     try:
         aniHunter = AniGetter(user_input.mal_user_name)
         user_stats = aniHunter.user_statistics()
-        mapped_stats = json.dumps({
+        mapped_stats = {
             "All Animes": user_stats[0],
             "Watching": user_stats[1],
             "Completed": user_stats[2],
             "On Hold": user_stats[3],
             "Dropped": user_stats[4],
             "Plan to Watch": user_stats[5]
-        })
+        }
         return JSONResponse(content=mapped_stats)
     except JikanException:
         exception.user_exception(user_input.mal_user_name)
@@ -173,12 +184,13 @@ async def spotPlaylist(ani_input: RangeModel):
     total_fetches = m.ceil(target_amount / 200)
     anime_processed = 0
     anime_id_list = []
-
     fetches = 0
+
+    print("Fetching User Anime Collections")
     while fetches <= total_fetches:
-        url = generate_url(ani_input.mal_user_name, start, ani_input.category_type)
+        url = generate_url(ani_input.mal_user_name, start + (fetches * 200), ani_input.category_type)
         response = requests.get(url, headers=header)
-        print("Fetching User Anime Collections")
+
         if response.status_code == 200:
             ani_data = response.json()
             if fetches == 0 and len(ani_data) == 0:
@@ -193,15 +205,12 @@ async def spotPlaylist(ani_input: RangeModel):
                     break
 
         fetches += 1
-        start += 200
 
-    anime_song_collection = get_songs(anime_id_list, target_amount, aniHunter)
+    anime_song_collection = get_songs(anime_id_list, aniHunter)
 
     print("Extracted All Required Songs")
     spotify_access = authenticate()
-    if spotify_access is None:
-        return JSONResponse(content={"body": "Spotify Auth Error"})
-    track_ids = get_track_ids(spotify_access, aniTuneLibrary)
+    track_ids = get_track_ids(spotify_access, anime_song_collection)
     print("Extract Song Track Id")
     userid = spotify_access.current_user()["id"]
     playlist_name = str(uuid4())
