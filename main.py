@@ -1,6 +1,7 @@
 import json
 import time
-
+import re
+import aiohttp
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -60,42 +61,43 @@ async def fetch_anime_details(url, session):
     async with session.get(url, headers=mal_api_header) as response:
         if response.status == 200:
             return await response.json()
-        elif response.status == 500:
-            return None
 
 
-def get_songs(anime_ids: list, hunter):
+async def get_songs(anime_ids: list):
     print("Extracting song id")
     anime_lib = set()
+    processed_anime_id = 0
 
-    for aid in anime_ids:
+    async with aiohttp.ClientSession() as session:
+        while processed_anime_id <= len(anime_ids):
+            task = [fetch_anime_details(
+                f"https://api.myanimelist.net/v2/anime/{aid}?fields=title,opening_themes,ending_themes", session) for
+                aid in anime_ids[processed_anime_id:processed_anime_id + 3]]
+            result = await asyncio.gather(*task)
+            print("." * len(result), end="")
 
-        try:
-            ani_result = hunter.get_theme_songs(aid)
-        except JikanException as e:
-            time.sleep(1)
-            ani_result = hunter.get_theme_songs(aid)
+            for ani_result in result:
+                for song_detail in ani_result.get("opening_themes", []):
+                    song_name = song_detail.get("text")
+                    if "ep" in song_name or "eps" in song_name:
+                        eps_start = song_name.find("ep")
+                        eps_end = song_name[eps_start:].find(")") + eps_start
+                        song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
-        for song_detail in ani_result.get("openings", []):
-            if "eps" in song_detail:
-                eps_start = song_detail.find("eps")
-                eps_end = song_detail[eps_start:].find(")") + eps_start
-                song_name = song_detail[:eps_start - 1] + song_detail[eps_end + 1:]
-            else:
-                song_name = song_detail
+                    title = re.sub("^#[0-9]+:|\"", "", song_name)
+                    anime_lib.add(title.strip())
 
-            anime_lib.add(song_name.strip())
+                for song_detail in ani_result.get("ending_themes", []):
+                    song_name = song_detail.get("text")
+                    if "eps" in song_name or "ep" in song_name:
+                        eps_start = song_name.find("ep")
+                        eps_end = song_name[eps_start:].find(")") + eps_start
+                        song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
-        for song_detail in ani_result.get("endings", []):
-            if "eps" in song_detail:
-                eps_start = song_detail.find("eps")
-                eps_end = song_detail[eps_start:].find(")") + eps_start
-                song_name = song_detail[:eps_start - 1] + song_detail[eps_end + 1:]
-            else:
-                song_name = song_detail
+                    title = re.sub("^#[0-9]+:|\"", "", song_name)
+                    anime_lib.add(title.strip())
 
-            anime_lib.add(song_name.strip())
-
+            processed_anime_id += 3
     return anime_lib
 
 
@@ -122,6 +124,7 @@ def authenticate():
 def get_track_ids(sp, s_names: set):
     track_ids = []
     while len(s_names) != 0:
+        print("-", end="")
         song = s_names.pop()
         result = sp.search(q=song, limit=1, type="track")
         tracks = result['tracks']['items']
@@ -147,37 +150,10 @@ async def delete_playlist(sp, time, playlist_id, uid):
     print(f"Playlist {playlist_id} Deleted")
 
 
-@app.get("/home")
-async def get_anime_list(user_input: InputModel):
-    if user_input.mal_user_name is None:
-        exception.user_field_empty_exception()
-
-    try:
-        aniHunter = AniGetter(user_input.mal_user_name)
-        user_stats = aniHunter.user_statistics()
-        mapped_stats = {
-            "All Animes": user_stats[0],
-            "Watching": user_stats[1],
-            "Completed": user_stats[2],
-            "On Hold": user_stats[3],
-            "Dropped": user_stats[4],
-            "Plan to Watch": user_stats[5]
-        }
-        return JSONResponse(content=mapped_stats)
-    except JikanException:
-        exception.user_exception(user_input.mal_user_name)
-
-
-@app.post("/fetch")
+@app.post("/home")
 async def spotPlaylist(ani_input: RangeModel):
     if 0 < ani_input.category_type and ani_input.category_type > 6:
         exception.category_exception()
-
-    aniHunter = AniGetter(ani_input.mal_user_name)
-    user_stats = aniHunter.user_statistics()
-
-    if ani_input.anime_start > user_stats[ani_input.category_type]:
-        exception.anime_range_exception()
 
     start = ani_input.anime_start
     target_amount = ani_input.anime_total
@@ -193,10 +169,13 @@ async def spotPlaylist(ani_input: RangeModel):
 
         if response.status_code == 200:
             ani_data = response.json()
-            if fetches == 0 and len(ani_data) == 0:
-                exception.empty_category_exception(
-                    ["All Anime", "Watching", "Completed", "On Hold", "Dropped", "Plan to Watch"][
-                        ani_input.category_type])
+
+            if len(ani_data) == 0:
+                if fetches == 0:
+                    exception.empty_category_exception(
+                        ["All Anime", "Watching", "Completed", "On Hold", "Dropped", "Plan to Watch"][
+                            ani_input.category_type])
+                break
 
             for anime_entry in ani_data:
                 anime_id_list.append(anime_entry.get("anime_id"))
@@ -205,8 +184,9 @@ async def spotPlaylist(ani_input: RangeModel):
                     break
 
         fetches += 1
+        time.sleep(0.5)
 
-    anime_song_collection = get_songs(anime_id_list, aniHunter)
+    anime_song_collection = await get_songs(anime_id_list)
 
     print("Extracted All Required Songs")
     spotify_access = authenticate()
