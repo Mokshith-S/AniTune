@@ -1,30 +1,29 @@
-import json
 import time
 import re
 import aiohttp
 import requests
+from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import uvicorn
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse
 import asyncio
-from rate_limiter import RateLimiter
 from dotenv import load_dotenv
 from uuid import uuid4
 import os
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-from jikanpy.exceptions import JikanException
 from exception_handler import AniException
-from ani_getter import AniGetter
-from model import InputModel, RangeModel
+from model import RangeModel
 import math as m
+from ani_getter import AniMemory
 
 load_dotenv("./access_key.env")
 
 app = FastAPI()
 exception = AniException()
+ani_memory = AniMemory()
 
 API_KEY = os.getenv("API_KEY")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -79,26 +78,36 @@ async def get_songs(anime_ids: list):
             for ani_result in result:
                 for song_detail in ani_result.get("opening_themes", []):
                     song_name = song_detail.get("text")
+                    song_id = song_detail.get("id")
+
+                    if ani_memory.check_memory(song_id):
+                        continue
+
                     if "ep" in song_name or "eps" in song_name:
                         eps_start = song_name.find("ep")
                         eps_end = song_name[eps_start:].find(")") + eps_start
                         song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
                     title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib.add(title.strip())
+                    anime_lib.add([song_id, title.strip()])
 
                 for song_detail in ani_result.get("ending_themes", []):
                     song_name = song_detail.get("text")
+                    song_id = song_detail.get("id")
+
+                    if ani_memory.check_memory(song_id):
+                        continue
+
                     if "eps" in song_name or "ep" in song_name:
                         eps_start = song_name.find("ep")
                         eps_end = song_name[eps_start:].find(")") + eps_start
                         song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
                     title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib.add(title.strip())
+                    anime_lib.add([song_id, title.strip()])
 
             processed_anime_id += 3
-    return anime_lib
+    return list(anime_lib)
 
 
 def generate_url(mal_user, offset, category_type):
@@ -120,16 +129,26 @@ def authenticate():
     except requests.exceptions.RequestException as e:
         raise exception.spotify_auth_exception(e)
 
+def track_extractor(sp, song_info: list):
+    print("-", end="")
+    result = sp.search(q=song_info[1], limit=1, type="track")
+    tracks = result['tracks']['items']
+    if tracks:
+        return [song_info[0], tracks[0]['id']]
+    else:
+        return None
 
-def get_track_ids(sp, s_names: set):
+def get_track_ids(sp, s_names: list):
     track_ids = []
-    while len(s_names) != 0:
-        print("-", end="")
-        song = s_names.pop()
-        result = sp.search(q=song, limit=1, type="track")
-        tracks = result['tracks']['items']
-        if tracks:
-            track_ids.append(tracks[0]['id'])
+    song_counter = 0
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        while song_counter <= len(s_names):
+            track_cluster = executor.map(track_extractor, [sp] * 3, s_names[song_counter : song_counter + 3])
+
+            for track in track_cluster:
+                if track:
+                    track_ids.append(track[1])
+            song_counter += 3
     return track_ids
 
 
