@@ -77,12 +77,14 @@ async def get_songs(anime_ids: list):
 
             for ani_result in result:
                 if ani_result is None:
+                    anime_lib[song_id] = None
                     continue
                 for song_detail in ani_result.get("opening_themes", []):
                     song_name = song_detail.get("text")
-                    song_id = song_detail.get("id")
+                    song_id = str(song_detail.get("id"))
 
                     if ani_memory.check_memory(song_id):
+                        anime_lib[song_id] = None
                         continue
 
                     if "ep" in song_name or "eps" in song_name:
@@ -95,7 +97,7 @@ async def get_songs(anime_ids: list):
 
                 for song_detail in ani_result.get("ending_themes", []):
                     song_name = song_detail.get("text")
-                    song_id = song_detail.get("id")
+                    song_id = str(song_detail.get("id"))
 
                     if ani_memory.check_memory(song_id):
                         continue
@@ -160,7 +162,7 @@ def get_track_ids(sp, s_collection: dict):
             else:
                 track = ani_memory.get_song_track(id)
                 track_ids.append(track)
-                print("_", end="")
+                print("#", end="")
 
             if len(chunk) == 3 or song_counter == len(s_collection) - 1:
                 track_cluster = executor.map(track_extractor, [sp] * len(chunk), chunk)
