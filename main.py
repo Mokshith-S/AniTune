@@ -64,7 +64,7 @@ async def fetch_anime_details(url, session):
 
 async def get_songs(anime_ids: list):
     print("Extracting song id")
-    anime_lib = set()
+    anime_lib = dict()
     processed_anime_id = 0
 
     async with aiohttp.ClientSession() as session:
@@ -76,6 +76,8 @@ async def get_songs(anime_ids: list):
             print("." * len(result), end="")
 
             for ani_result in result:
+                if ani_result is None:
+                    continue
                 for song_detail in ani_result.get("opening_themes", []):
                     song_name = song_detail.get("text")
                     song_id = song_detail.get("id")
@@ -89,7 +91,7 @@ async def get_songs(anime_ids: list):
                         song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
                     title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib.add([song_id, title.strip()])
+                    anime_lib[song_id] = title.strip()
 
                 for song_detail in ani_result.get("ending_themes", []):
                     song_name = song_detail.get("text")
@@ -104,10 +106,10 @@ async def get_songs(anime_ids: list):
                         song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
                     title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib.add([song_id, title.strip()])
+                    anime_lib[song_id] = title.strip()
 
             processed_anime_id += 3
-    return list(anime_lib)
+    return anime_lib
 
 
 def generate_url(mal_user, offset, category_type):
@@ -129,27 +131,50 @@ def authenticate():
     except requests.exceptions.RequestException as e:
         raise exception.spotify_auth_exception(e)
 
-def track_extractor(sp, song_info: list):
+
+def track_extractor(sp, song_info: str):
     print("-", end="")
-    result = sp.search(q=song_info[1], limit=1, type="track")
+    result = sp.search(q=song_info, limit=1, type="track")
     tracks = result['tracks']['items']
     if tracks:
-        return [song_info[0], tracks[0]['id']]
+        return tracks[0]['id']
     else:
         return None
 
-def get_track_ids(sp, s_names: list):
+
+def get_track_ids(sp, s_collection: dict):
     track_ids = []
     song_counter = 0
     with ThreadPoolExecutor(max_workers=3) as executor:
-        while song_counter <= len(s_names):
-            track_cluster = executor.map(track_extractor, [sp] * 3, s_names[song_counter : song_counter + 3])
+        chunk = []
+        ids_chunk = []
+        ids = list(s_collection.keys())
+        titles = list(s_collection.values())
+        while song_counter < len(titles):
+            id = ids[song_counter]
+            name = titles[song_counter]
 
-            for track in track_cluster:
-                if track:
-                    track_ids.append(track[1])
-            song_counter += 3
-    return track_ids
+            if not ani_memory.check_memory(id):
+                ids_chunk.append(id)
+                chunk.append(name)
+            else:
+                track = ani_memory.get_song_track(id)
+                track_ids.append(track)
+                print("_", end="")
+
+            if len(chunk) == 3 or song_counter == len(s_collection) - 1:
+                track_cluster = executor.map(track_extractor, [sp] * len(chunk), chunk)
+
+                for id, track in zip(ids_chunk, track_cluster):
+                    if track:
+                        track_ids.append(track)
+                    ani_memory.add_song_memory(id, track)
+                chunk.clear()
+                ids_chunk.clear()
+
+            song_counter += 1
+    ani_memory.save()
+    return list(set(track_ids))
 
 
 def create_playlist(sp, userid, playlist_name, playlist_desc, track_ids):
