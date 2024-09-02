@@ -60,6 +60,7 @@ async def fetch_anime_details(url, session):
     async with session.get(url, headers=mal_api_header) as response:
         if response.status == 200:
             return await response.json()
+        time.sleep(0.5)
 
 
 async def get_songs(anime_ids: list):
@@ -76,15 +77,11 @@ async def get_songs(anime_ids: list):
             print("." * len(result), end="")
 
             for ani_result in result:
-                if ani_result is None:
-                    anime_lib[song_id] = None
-                    continue
                 for song_detail in ani_result.get("opening_themes", []):
                     song_name = song_detail.get("text")
                     song_id = str(song_detail.get("id"))
 
                     if ani_memory.check_memory(song_id):
-                        anime_lib[song_id] = None
                         continue
 
                     if "ep" in song_name or "eps" in song_name:
@@ -136,7 +133,7 @@ def authenticate():
 
 def track_extractor(sp, song_info: str):
     print("-", end="")
-    result = sp.search(q=song_info, limit=1, type="track")
+    result = sp.search(q=f"track:{song_info}", limit=1, type="track")
     tracks = result['tracks']['items']
     if tracks:
         return tracks[0]['id']
@@ -198,7 +195,7 @@ async def delete_playlist(sp, time, playlist_id, uid):
 
 @app.post("/home")
 async def spotPlaylist(ani_input: RangeModel):
-    if 0 < ani_input.category_type and ani_input.category_type > 6:
+    if 0 > ani_input.category_type and ani_input.category_type > 6:
         exception.category_exception()
 
     start = ani_input.anime_start
