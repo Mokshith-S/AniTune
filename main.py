@@ -56,11 +56,29 @@ mal_api_header = {
 }
 
 
+def retry_controller(times=5):
+    def decorator(func):
+        def wrapper(*args):
+            req_retry = 0
+            while req_retry < times:
+                try:
+                    return func(*args)
+                except Exception as e:
+                    req_retry += 1
+                    print("retry triggered")
+                    time.sleep(0.2 * req_retry)
+            return func(*args)
+
+        return wrapper
+
+    return decorator
+
+
+@retry_controller()
 async def fetch_anime_details(url, session):
     async with session.get(url, headers=mal_api_header) as response:
         if response.status == 200:
             return await response.json()
-        time.sleep(0.5)
 
 
 async def get_songs(anime_ids: list):
@@ -77,35 +95,36 @@ async def get_songs(anime_ids: list):
             print("." * len(result), end="")
 
             for ani_result in result:
-                for song_detail in ani_result.get("opening_themes", []):
-                    song_name = song_detail.get("text")
-                    song_id = str(song_detail.get("id"))
+                if ani_result:
+                    for song_detail in ani_result.get("opening_themes", []):
+                        song_name = song_detail.get("text")
+                        song_id = str(song_detail.get("id"))
 
-                    if ani_memory.check_memory(song_id):
-                        continue
+                        if ani_memory.check_memory(song_id):
+                            continue
 
-                    if "ep" in song_name or "eps" in song_name:
-                        eps_start = song_name.find("ep")
-                        eps_end = song_name[eps_start:].find(")") + eps_start
-                        song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
+                        if "ep" in song_name or "eps" in song_name:
+                            eps_start = song_name.find("ep")
+                            eps_end = song_name[eps_start:].find(")") + eps_start
+                            song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
-                    title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib[song_id] = title.strip()
+                        title = re.sub("^#[0-9]+:|\"", "", song_name)
+                        anime_lib[song_id] = title.strip()
 
-                for song_detail in ani_result.get("ending_themes", []):
-                    song_name = song_detail.get("text")
-                    song_id = str(song_detail.get("id"))
+                    for song_detail in ani_result.get("ending_themes", []):
+                        song_name = song_detail.get("text")
+                        song_id = str(song_detail.get("id"))
 
-                    if ani_memory.check_memory(song_id):
-                        continue
+                        if ani_memory.check_memory(song_id):
+                            continue
 
-                    if "eps" in song_name or "ep" in song_name:
-                        eps_start = song_name.find("ep")
-                        eps_end = song_name[eps_start:].find(")") + eps_start
-                        song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
+                        if "eps" in song_name or "ep" in song_name:
+                            eps_start = song_name.find("ep")
+                            eps_end = song_name[eps_start:].find(")") + eps_start
+                            song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
 
-                    title = re.sub("^#[0-9]+:|\"", "", song_name)
-                    anime_lib[song_id] = title.strip()
+                        title = re.sub("^#[0-9]+:|\"", "", song_name)
+                        anime_lib[song_id] = title.strip()
 
             processed_anime_id += 3
     return anime_lib
@@ -206,7 +225,7 @@ async def spotPlaylist(ani_input: RangeModel):
     fetches = 0
 
     print("Fetching User Anime Collections")
-    while fetches <= total_fetches:
+    while fetches < total_fetches:
         url = generate_url(ani_input.mal_user_name, start + (fetches * 200), ani_input.category_type)
         response = requests.get(url, headers=header)
 
