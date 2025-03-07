@@ -23,3 +23,11 @@ class AniException:
 
     def spotify_auth_exception(self, e):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Error: {e}")
+
+class DB_Exception:
+
+    def db_exception(self):
+        raise Exception("Database is not intialized")
+
+    def collection_exception(self):
+        raise Exception("Collection is not intialized")
