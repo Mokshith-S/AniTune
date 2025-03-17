@@ -7,14 +7,16 @@ db_excep = DB_Exception()
 class DB_initialize:
     mongo_connect = None
     mongo_db = None
-    mongo_collection = None
+    ani_detail = None
+    auths = None
 
     @staticmethod
-    def initialize(connection_url):
+    def initialize(connection_url:str):
         if not DB_initialize.mongo_connect:
             DB_initialize.mongo_connect = MongoClient(connection_url)
             DB_initialize.mongo_db = DB_initialize.mongo_connect['AniTune']
-            DB_initialize.mongo_collection = DB_initialize.mongo_db['AniLibrary']
+            DB_initialize.ani_detail = DB_initialize.mongo_db['AniLibrary']
+            DB_initialize.auths = DB_initialize.mongo_db['Spotify_auth']
 
     @staticmethod
     def get_db():
@@ -24,11 +26,13 @@ class DB_initialize:
             return DB_initialize.mongo_db
 
     @staticmethod
-    def get_collection():
-        if DB_initialize.mongo_collection is None:
-            db_excep.collection_exception()
-        else:
-            return DB_initialize.mongo_collection
+    def get_collection(type:str):
+        if type == 'details':
+            if DB_initialize.ani_detail is None:
+                db_excep.collection_exception()
+            return DB_initialize.ani_detail
+        elif type == 'auth':
+            return DB_initialize.auths
 
 
 #############################################
@@ -36,7 +40,7 @@ class DB_initialize:
 def insert_(records, anime_info: dict):
     records.insert_one(anime_info)
 
-def find_(records, anime_id: int, mode='value'):
+def find_(records, anime_id: int, mode:str='value'):
     atune = records.find_one({'aid': anime_id})
     if mode == 'status':
         return bool(atune)
@@ -45,6 +49,15 @@ def find_(records, anime_id: int, mode='value'):
             'opening': atune['opening'],
             'ending': atune['ending']
         }
+
+def fetch_user_authcode(records, session_id:str):
+    auth = records.find_one({'session_id': session_id})
+    return auth['auth']
+
+def find_and_insert(records, session_id: str, data: dict):
+    records.updateOne({'session_id': session_id},
+                      {'$set': data})
+
 
 if __name__ == '__main__':
     db = DB_initialize("mongodb://localhost:27017/")

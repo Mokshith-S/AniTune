@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import uvicorn
-from fastapi import FastAPI, status
+from fastapi import FastAPI, status, Request
 from fastapi.responses import JSONResponse
 import asyncio
 from dotenv import load_dotenv
@@ -18,9 +18,10 @@ from exception_handler import AniException
 from model import RangeModel
 import math as m
 from ani_getter import AniMemory
-from database import insert_, find_, DB_initialize
-from spotify_module import search_, generate_token
+from database import insert_, find_, DB_initialize, fetch_user_authcode, find_and_insert
+from spotify_module import search_, generate_token, get_user_authorization
 from fuzzywuzzy import fuzz
+from uuid import uuid4
 ###################################################
 load_dotenv("./access_key.env")
 app = FastAPI()
@@ -182,7 +183,7 @@ def get_track_ids(sp, untraced_anime: list, workers=4):
                 track_cluster = executor.map(track_extractor, [sp] * len(chunk), chunk)
 
             processed.append(untrace_sp_anime.update({'spotify_track_id': track_cluster}))
-            insert_(DB_initialize().get_collection(), untrace_sp_anime)
+            insert_(DB_initialize().get_collection('store'), untrace_sp_anime)
             chunk.clear()
 
         # while song_counter < len(titles):
@@ -228,9 +229,32 @@ async def delete_playlist(sp, time, playlist_id, uid):
     sp.user_playlist_unfollow(user=uid, playlist_id=playlist_id)
     print(f"Playlist {playlist_id} Deleted")
 
+@app.get('/callback')
+async def user_auth_endpoint(request: Request):
+    session_id = request.query_params.get('state')
+    auth_code = request.query_params.get('code')
+    data = {
+            'session_id': session_id,
+            'auth': str(auth_code)
+        }
+
+    insert_(DB_initialize.get_collection('auth'), data)
+
+@app.get('/authenticate')
+async def verify():
+    session_id = uuid4()
+    get_user_authorization(session_id)
+
 
 @app.post("/home")
-async def spotPlaylist(ani_input: RangeModel):
+async def home(ani_input: RangeModel):
+    user_auth_code = fetch_user_authcode(DB_initialize.get_collection('auth'), ani_input.session_id)
+    token, expire_time, refresh_token = generate_token(user_auth_code)
+    find_and_insert(user_auth_code, {
+        'token': token,
+        'expire': expire_time,
+        'refresh_token': refresh_token
+    })
     if ani_input.category_type < 0 and ani_input.category_type > 6:
         exception.category_exception()
 
@@ -259,8 +283,8 @@ async def spotPlaylist(ani_input: RangeModel):
 
             for anime_entry in ani_data[:target_amount - (len(target_anime_traced)+len(target_anime_untraced))]:
                 id = anime_entry.get("anime_id")
-                if find_(DB_initialize().get_collection(), id, 'status'):
-                    target_anime_traced.append(find_(DB_initialize().get_collection(), id, 'value'))
+                if find_(DB_initialize().get_collection('store'), id, 'status'):
+                    target_anime_traced.append(find_(DB_initialize().get_collection('store'), id, 'value'))
                 else:
                     target_anime_untraced.append({
                         'anime_id': id,
@@ -276,8 +300,9 @@ async def spotPlaylist(ani_input: RangeModel):
     new_traced_anime = await get_songs(target_anime_untraced)
 
     print("Extracted All Required Songs")
-    spotify_access = authenticate()
-    # spotify_access = generate_token()
+    # spotify_access = authenticate()
+    # state_id = uuid4()
+    # spotify_access =
     processed_anime = get_track_ids(spotify_access, new_traced_anime)
     response = target_anime_traced + processed_anime
     track_id = []

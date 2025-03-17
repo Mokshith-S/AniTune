@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import base64
 import requests
 import json
+import webbrowser
 #############################
 load_dotenv(r'.\access_key.env')
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -12,23 +13,40 @@ SPOTIFY_USER = os.getenv("SPOTIFY_USER")
 spotipy_api_url = 'https://accounts.spotify.com/api/token'
 spotipy_search_url = 'https://api.spotify.com/v1/search'
 spotify_create_playlist_url = f'https://api.spotify.com/v1/users/{SPOTIFY_USER}/playlists'
-# spotify_user_url = 'https://api.spotify.com/v1/me'
+spotify_user_authorization_url = 'https://accounts.spotify.com/authorize'
+redirect_url = "http://127.0.0.1:80/callback"
+#############################
+scopes = "playlist-modify-private playlist-modify-public"
 #############################
 
-def generate_token():
+def generate_token(auth_code, refresh_token=None):
     auth_string = CLIENT_ID + ":" + CLIENT_KEY
-    auth_bytes = auth_string.encode('utf-8')
-    auth_base64 = str(base64.b64encode(auth_bytes), 'utf-8')
+    auth_base64 = base64.b64encode(auth_string.encode()).decode()
 
     header = {
         "Authorization": "Basic " + auth_base64,
         'Content-Type': 'application/x-www-form-urlencoded'
     }
-    data = {'grant_type': 'client_credentials'}
+    if refresh_token:
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        }
+    else:
+        # data = {'grant_type': 'client_credentials'}
+        data = {
+                'grant_type': 'authorization_code',
+                'code': auth_code,
+                'redirect_uri': redirect_url
+            }
     response = requests.post(spotipy_api_url, headers=header, data=data)
     if response.status_code == 200:
         access_token = json.loads(response.content)
-        return access_token['access_token']
+        token = access_token['access_token']
+        refresh_token = access_token['refresh_token']
+        expire_time = access_token['expires_in']
+
+        return token, expire_time, refresh_token
 
 def get_auth_header(token):
     return {'Authorization': 'Bearer ' + token}
@@ -43,8 +61,9 @@ def search_(search_string, type, token):
         tar_result = search_res['tracks']['items'][0]
         return tar_result['id'], tar_result['name']
 
-def get_current_user():
-    ...
+def get_user_authorization(session_id):
+    user_auth_url = f'{spotify_user_authorization_url}?client_id={CLIENT_ID}&response_type=code&scope={scopes}&redirect_uri={redirect_url}&state={session_id}'
+    webbrowser.open(user_auth_url)
 
 def spotify_playlist(playlist_name, mal_uname, token):
     header = get_auth_header(token)
