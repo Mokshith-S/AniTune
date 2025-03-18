@@ -51,8 +51,8 @@ def generate_token(auth_code, refresh_token=None):
 def get_auth_header(token):
     return {'Authorization': 'Bearer ' + token}
 
-def search_(search_string, type, token):
-    query = f'?q={search_string}&type={type}&limit=1'
+def search_in_spotify(name, type, token):
+    query = f'?q={name}&type={type}&limit=1'
     header = get_auth_header(token)
     search_url = spotipy_search_url + query
     response = requests.get(search_url, headers=header)

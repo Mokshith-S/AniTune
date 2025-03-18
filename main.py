@@ -19,7 +19,7 @@ from model import RangeModel
 import math as m
 from ani_getter import AniMemory
 from database import insert_, find_, DB_initialize, fetch_user_authcode, find_and_insert
-from spotify_module import search_, generate_token, get_user_authorization
+from spotify_module import search_in_spotify, generate_token, get_user_authorization
 from fuzzywuzzy import fuzz
 from uuid import uuid4
 ###################################################
@@ -100,28 +100,54 @@ async def get_songs(anime_group: list):
                     if ani_result:
                         song_titles = []
                         for song_detail in ani_result.get("opening_themes", []):
-                            song_name = song_detail.get("text")
+                            artist = ''
+                            name = ''
+                            song_info = song_detail.get("text")
 
-                            if "ep" in song_name or "eps" in song_name:
-                                eps_start = song_name.find("ep")
-                                eps_end = song_name[eps_start:].find(")") + eps_start
-                                song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
+                            eidx = song_info[1:].find('"')
+                            name = song_info[1:eidx + 1]
+                            if not name.replace(' ', '').isalpha():
+                                base_lang_sidx = name.find('(')
+                                base_lang_eidx = name.find(')')
+                                name = name[base_lang_sidx: base_lang_eidx + 1]
 
-                            title = re.sub("^#[0-9]+:|\"", "", song_name)
-                            song_titles.append(title.strip())
+                            artist = song_info[eidx + 5:]
+                            if '(' in artist:
+                                base_artist_sidx = artist.find('(')
+                                base_artist_eidx = artist.find(')')
+
+                                holder = artist[base_artist_sidx: base_artist_eidx + 1]
+                                if not 'ep' in holder:
+                                    artist = holder
+                                else:
+                                    artist = artist[:base_artist_sidx-1]
+                            song_titles.append({name: artist})
+
                         anime_group[index].update({'opening_theme_names': song_titles})
                         song_titles.clear()
 
                         for song_detail in ani_result.get("ending_themes", []):
-                            song_name = song_detail.get("text")
+                            song_info = song_detail.get("text")
 
-                            if "eps" in song_name or "ep" in song_name:
-                                eps_start = song_name.find("ep")
-                                eps_end = song_name[eps_start:].find(")") + eps_start
-                                song_name = song_name[:eps_start - 1] + song_name[eps_end + 1:]
+                            eidx = song_info[1:].find('"')
+                            name = song_info[1:eidx + 1]
+                            if not name.replace(' ', '').isalpha():
+                                base_lang_sidx = name.find('(')
+                                base_lang_eidx = name.find(')')
+                                name = name[base_lang_sidx: base_lang_eidx + 1]
 
-                            title = re.sub("^#[0-9]+:|\"", "", song_name)
-                            song_titles.append(title.strip())
+                            artist = song_info[eidx + 5:]
+                            if '(' in artist:
+                                base_artist_sidx = artist.find('(')
+                                base_artist_eidx = artist.find(')')
+
+                                holder = artist[base_artist_sidx: base_artist_eidx + 1]
+                                if not 'ep' in holder:
+                                    artist = holder
+                                else:
+                                    artist = artist[:base_artist_sidx - 1]
+                            song_titles.append({name: artist})
+
                         anime_group[index].update({'ending_theme_names': song_titles})
                 task.clear()
     return anime_group
@@ -147,7 +173,7 @@ def authenticate():
         raise exception.spotify_auth_exception(e)
 
 
-def track_extractor(sp, song_info: str):
+def track_extractor(token, song_info: str):
     eidx = song_info[1:].find('"')
     name = song_info[1:eidx+1]
     if not name.replace(' ', '').isalpha():
@@ -163,11 +189,11 @@ def track_extractor(sp, song_info: str):
         holder = artist[base_artist_sidx: base_artist_eidx+1]
         if not 'ep' in holder:
             artist = holder
-    track_id, song_name = search_(name, 'track', sp)
+    track_id, song_name = search_in_spotify(name, 'track', token)
     if fuzz.ratio(song_name, name) > 90:
         return {name: track_id}
     else:
-        return None
+        return {name: None}
 
 
 
@@ -175,12 +201,13 @@ def get_track_ids(sp, untraced_anime: list, workers=4):
     with ThreadPoolExecutor(max_workers=workers) as executor:
         chunk = []
         processed = []
+        track_cluster = []
         for index, untrace_sp_anime in enumerate(untraced_anime):
             chunk.extend(untrace_sp_anime['opening_theme_names'])
             chunk.extend(untrace_sp_anime['ending_theme_names'])
 
             for idx in range(0, len(chunk), workers):
-                track_cluster = executor.map(track_extractor, [sp] * len(chunk), chunk)
+                track_cluster.extend(executor.map(track_extractor, [sp] * len(chunk), chunk))
 
             processed.append(untrace_sp_anime.update({'spotify_track_id': track_cluster}))
             insert_(DB_initialize().get_collection('store'), untrace_sp_anime)
@@ -303,16 +330,16 @@ async def home(ani_input: RangeModel):
     # spotify_access = authenticate()
     # state_id = uuid4()
     # spotify_access =
-    processed_anime = get_track_ids(spotify_access, new_traced_anime)
+    processed_anime = get_track_ids(token, new_traced_anime)
     response = target_anime_traced + processed_anime
     track_id = []
     for res in response:
         track_id.extend(res.get('spotify_track_id'))
     print("Extract Song Track Id")
-    userid = spotify_access.current_user()["id"]
+    # userid = spotify_access.current_user()["id"]
     playlist_name = str(uuid4())
     playlist_desc = ("Listen to your favourite anime songs")
-    play_id, link = create_playlist(spotify_access, userid, playlist_name, playlist_desc, track_id)
+    play_id, link = create_playlist(token, userid, playlist_name, playlist_desc, track_id)
     print(f"Created Playlist {playlist_name}")
     asyncio.create_task(delete_playlist(spotify_access, 300, play_id, userid))
     print("Initiated Playlist Deletion")

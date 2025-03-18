@@ -45,10 +45,7 @@ def find_(records, anime_id: int, mode:str='value'):
     if mode == 'status':
         return bool(atune)
     if mode == 'value':
-        return {
-            'opening': atune['opening'],
-            'ending': atune['ending']
-        }
+        return atune['spotify_track_id']
 
 def fetch_user_authcode(records, session_id:str):
     auth = records.find_one({'session_id': session_id})
