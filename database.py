@@ -2,8 +2,11 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
 from exception_handler import DB_Exception
+
 #############################################
 db_excep = DB_Exception()
+
+
 class DB_initialize:
     mongo_connect = None
     mongo_db = None
@@ -11,12 +14,11 @@ class DB_initialize:
     auths = None
 
     @staticmethod
-    def initialize(connection_url:str):
-        if not DB_initialize.mongo_connect:
-            DB_initialize.mongo_connect = MongoClient(connection_url)
-            DB_initialize.mongo_db = DB_initialize.mongo_connect['AniTune']
-            DB_initialize.ani_detail = DB_initialize.mongo_db['AniLibrary']
-            DB_initialize.auths = DB_initialize.mongo_db['Spotify_auth']
+    def initialize(connection_url: str):
+        DB_initialize.mongo_connect = MongoClient(connection_url)
+        DB_initialize.mongo_db = DB_initialize.mongo_connect['AniTune']
+        DB_initialize.ani_detail = DB_initialize.mongo_db['AniLibrary']
+        DB_initialize.auths = DB_initialize.mongo_db['Spotify_auth']
 
     @staticmethod
     def get_db():
@@ -26,8 +28,8 @@ class DB_initialize:
             return DB_initialize.mongo_db
 
     @staticmethod
-    def get_collection(type:str):
-        if type == 'details':
+    def get_collection(type: str):
+        if type == 'store':
             if DB_initialize.ani_detail is None:
                 db_excep.collection_exception()
             return DB_initialize.ani_detail
@@ -40,22 +42,27 @@ class DB_initialize:
 def insert_(records, anime_info: dict):
     records.insert_one(anime_info)
 
-def find_(records, anime_id: int, mode:str='value'):
+
+def find_(records, anime_id: int, mode: str = 'value'):
     atune = records.find_one({'aid': anime_id})
     if mode == 'status':
         return bool(atune)
     if mode == 'value':
-        return atune['spotify_track_id']
+        songs = atune['songs']
+        tracks = [x['track_id'] for x in songs if x['track_id']]
+        return tracks
 
-def fetch_user_authcode(records, session_id:str):
+
+def fetch_user_authcode(records, session_id: str):
     auth = records.find_one({'session_id': session_id})
     return auth['auth']
 
-def find_and_insert(records, session_id: str, data: dict):
+
+def find_and_update(records, session_id: str, data: dict):
     records.updateOne({'session_id': session_id},
                       {'$set': data})
 
 
 if __name__ == '__main__':
     db = DB_initialize("mongodb://localhost:27017/")
-    insert_(db, {'a':134})
+    insert_(db, {'a': 134})
