@@ -74,10 +74,10 @@ def add_tracks(playlist_id, tracks, token):
     headers.update({'Content-Type': 'application/json'})
     for idx in range(0, len(tracks), 100):
         block = tracks[idx: idx + 100]
-        tracks = list(map(f'spotify:track:{tid}' for tid in block))
-        data = {'uris': tracks}
+        tracks = list(map(lambda tid: f'spotify:track:{tid}', block))
+        data = json.dumps({'uris': tracks})
         response = requests.post(url, headers=headers, data=data)
-        if response.status_code == 200:
+        if response.status_code == 201:
             pass
 
 
@@ -102,7 +102,7 @@ def spotify_playlist(playlist_name, mal_uname, token):
     data = json.dumps({'name': playlist_name, 'description': f'{mal_uname}\'s Spotify PlayList', 'public': False})
     url = spotify_create_playlist_url + f'{current_uid}/playlists'
     response = requests.post(url, headers=header, data=data)
-    if response.status_code == 200:
+    if response.status_code == 201:
         result = json.loads(response.content)
         playlist_id = result['id']
         return playlist_id

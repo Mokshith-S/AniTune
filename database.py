@@ -43,14 +43,9 @@ def insert_(records, anime_info: dict):
     records.insert_one(anime_info)
 
 
-def find_(records, anime_id: int, mode: str = 'value'):
-    atune = records.find_one({'aid': anime_id})
-    if mode == 'status':
-        return bool(atune)
-    if mode == 'value':
-        songs = atune['songs']
-        tracks = [x['track_id'] for x in songs if x['track_id']]
-        return tracks
+def find_(records, anime_id: int):
+    atune = records.find_one({'anime_id': anime_id})
+    return atune
 
 
 def fetch_user_authcode(records, session_id: str):
@@ -59,8 +54,8 @@ def fetch_user_authcode(records, session_id: str):
 
 
 def find_and_update(records, session_id: str, data: dict):
-    records.updateOne({'session_id': session_id},
-                      {'$set': data})
+    records.update_one({'session_id': session_id},
+                       {'$set': data})
 
 
 if __name__ == '__main__':
